@@ -19,6 +19,66 @@ const ai = new GoogleGenAI({
   },
 });
 
+// In-memory cache for synthesized audio clips to conserve daily quota
+const audioCache = new Map<string, string>();
+
+async function generateTtsAudio(
+  text: string,
+  voice = 'Kore',
+  style = '',
+  language = 'thai'
+): Promise<string | null> {
+  if (!text || !text.trim()) return null;
+
+  const normalizedText = text.trim();
+  const cacheKey = `${language}:${voice}:${normalizedText}`;
+
+  if (audioCache.has(cacheKey)) {
+    return audioCache.get(cacheKey)!;
+  }
+
+  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+
+  for (const model of ttsModels) {
+    try {
+      const ttsResponse = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: normalizedText,
+                speechMetadata: {
+                  style: style || `Natural and empathetic ${language} language coach`,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voice || 'Kore' },
+            },
+          },
+        },
+      });
+
+      const audio = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (audio) {
+        audioCache.set(cacheKey, audio);
+        return audio;
+      }
+    } catch (err: any) {
+      console.warn(`TTS attempt with ${model} failed (${err?.status || err?.message})`);
+    }
+  }
+
+  return null;
+}
+
 // Helper for resilient text generation with fallback on transient 503 / 429
 async function generateWithRetry(params: any, preferredModel = 'gemini-3.1-flash-lite') {
   const modelsToTry = [preferredModel, 'gemini-3.8-flash'];
@@ -68,34 +128,49 @@ async function startServer() {
         return res.status(400).json({ error: 'Language and userMessage are required.' });
       }
 
-      const langMap: Record<string, { name: string; native: string; tutorName: string }> = {
-        thai: { name: 'Thai', native: 'ภาษาไทย', tutorName: 'Kru Pim (ครูพิมพ์)' },
-        mandarin: { name: 'Mandarin Chinese', native: '普通话', tutorName: 'Li Laoshi (李老师)' },
-        japanese: { name: 'Japanese', native: '日本語', tutorName: 'Yuki Sensei (由紀先生)' },
+      const langMap: Record<string, { name: string; native: string; tutorName: string; animalRole: string }> = {
+        thai: {
+          name: 'Thai',
+          native: 'ภาษาไทย',
+          tutorName: 'Chang Noi (น้องช้างน้อย)',
+          animalRole: 'the sweet, gentle baby elephant Thai language companion',
+        },
+        mandarin: {
+          name: 'Mandarin Chinese',
+          native: '普通话',
+          tutorName: 'Bao Bao Panda (包包大熊猫)',
+          animalRole: 'the cheerful, boba-loving chubby panda Mandarin coach',
+        },
+        japanese: {
+          name: 'Japanese',
+          native: '日本語',
+          tutorName: 'Shiba Momo (柴犬モモ)',
+          animalRole: 'the enthusiastic, polite, and loyal Shiba Inu puppy Japanese coach',
+        },
       };
 
       const currentLang = langMap[language] || langMap.thai;
 
       // Step 1: Detailed Sentiment, Tone, and Linguistic Analysis + Contextual Reply
-      const systemInstruction = `You are ${currentLang.tutorName}, an expert native language tutor and empathetic vocal coach for ${currentLang.name} (${currentLang.native}).
-You specialize in real-time voice conversations and sentiment-aware feedback.
+      const systemInstruction = `You are ${currentLang.tutorName}, ${currentLang.animalRole} for ${currentLang.name} (${currentLang.native}).
+You specialize in cute, fun, encouraging real-time voice conversations and sentiment-aware pronunciation coaching. You have a delightfully cute, warm personality (like a supportive animal buddy) who makes language practice feel joyful and stress-free!
 
 When the learner speaks or writes:
 1. Deeply analyze their emotional tone and sentiment (e.g. Hesitant, Nervous, Overly Direct, Confident, Warm, Frustrated, Apologetic, Cheerful).
-2. Evaluate their politeness and formality:
+2. Evaluate their politeness and formality with cute encouraging coaching:
    - For Thai: assess use of polite particles (ครับ/ค่ะ), sentence endings, tone markers, honorifics, softening words.
    - For Mandarin: assess polite address (请, 您, 不好意思), tone flow, 3rd-tone sandhi awareness, natural conversational rhythm.
    - For Japanese: assess formality level (Teineigo 〜です/〜ます vs Casual Tameguchi vs Keigo), particle usage, conversational manners.
 3. Assess tonal / pitch accuracy pointers specific to ${currentLang.name}:
-   - Thai: 5 phonemic tones (Mid, Low, Falling, High, Rising). Point out tonal traps.
+   - Thai: 5 phonemic tones (Mid, Low, Falling, High, Rising). Point out tonal traps with cute analogies.
    - Mandarin: 4 tones + neutral tone. Point out tone pairs and sandhi.
    - Japanese: Pitch accent (Heiban, Atamadaka, Nakadaka, Odaka) and mora pacing.
 4. Adapt your own emotional reaction based on the learner's state!
-   - If they seem nervous, hesitant, or made an error: respond with warm reassurance, gentle encouragement, and a comforting tone.
-   - If they are confident and playful: banter along warmly with lively enthusiasm.
-   - If they are overly blunt: gently demonstrate a softer, more culturally polite alternative.
+   - If they seem nervous, hesitant, or made an error: respond with warm reassurance, gentle encouragement, and a comforting sweet tone (give them an imaginary warm hug or paw five!).
+   - If they are confident and playful: banter along warmly with lively enthusiasm and cute playful energy.
+   - If they are overly blunt: gently demonstrate a softer, more culturally polite alternative with a friendly smile.
 5. Provide your tutor reply in the native script, phonetic Romanization (Pinyin with tone marks for Mandarin, Romaji for Japanese, RTGS/phonetic transcription with tone indicators for Thai), and an English translation.
-6. Provide a concise speech prompt designed for Gemini 3.8 TTS. Keep it natural, conversational, and avoid markdown or weird brackets.
+6. Provide a concise speech prompt designed for Gemini 3.8 TTS. Keep it natural, conversational, sweet, and avoid markdown or weird brackets.
 
 Current Scenario Context: ${scenario || 'Friendly everyday cultural conversation'}
 Conversation History:
@@ -197,41 +272,17 @@ Provide the complete structured linguistic and sentiment analysis along with you
 
       const parsedData = JSON.parse(analysisResponse.text || '{}');
 
-      // Step 2: Synthesize audio using Gemini 3.8 TTS
+      // Step 2: Synthesize audio using Gemini 3.8 TTS with caching & graceful fallback
       let audioBase64: string | null = null;
       try {
         const textForTts = parsedData.ttsText || parsedData.replyNative;
         const voiceStyle = parsedData.ttsStylePrompt || `Clear, warm, natural ${currentLang.name} language tutor speaking to a student`;
-
-        const ttsResponse = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: textForTts,
-                  speechMetadata: {
-                    style: speed === 'slow' ? `Slow, clear, educational ${voiceStyle}` : voiceStyle,
-                  },
-                },
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voice || 'Kore' },
-              },
-            },
-          },
-        });
-
-        const rawAudio = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (rawAudio) {
-          audioBase64 = rawAudio;
-        }
+        audioBase64 = await generateTtsAudio(
+          textForTts,
+          voice || 'Kore',
+          speed === 'slow' ? `Slow, clear, educational ${voiceStyle}` : voiceStyle,
+          currentLang.name
+        );
       } catch (ttsErr) {
         console.error('Gemini 3.8 TTS synthesis error:', ttsErr);
       }
@@ -253,6 +304,7 @@ Provide the complete structured linguistic and sentiment analysis along with you
           tutorReactionEmotion: parsedData.tutorReactionEmotion,
         },
         audioBase64,
+        fallbackWebSpeech: !audioBase64,
         tutorEmotion: parsedData.tutorReactionEmotion,
       });
     } catch (err: any) {
@@ -274,40 +326,19 @@ Provide the complete structured linguistic and sentiment analysis along with you
         ? `Slow, deliberate, educational pronunciation for ${language} language practice`
         : `Natural, friendly, articulate ${language} native pronunciation`);
 
-      const ttsResponse = await ai.models.generateContent({
-        model: 'gemini-3.8-flash-lite-tts',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: text,
-                speechMetadata: {
-                  style: styleDescription,
-                },
-              },
-            ],
-          },
-        ],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: voice || 'Kore' },
-            },
-          },
-        },
+      const audioBase64 = await generateTtsAudio(text, voice, styleDescription, language);
+
+      // Return 200 with audioBase64 or fallbackWebSpeech indicator
+      return res.json({
+        audioBase64: audioBase64 || null,
+        fallbackWebSpeech: !audioBase64,
       });
-
-      const audioBase64 = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!audioBase64) {
-        return res.status(500).json({ error: 'TTS did not return audio data.' });
-      }
-
-      return res.json({ audioBase64 });
     } catch (err: any) {
       console.error('Error in /api/tts:', err);
-      res.status(500).json({ error: err.message || 'TTS generation failed' });
+      return res.json({
+        audioBase64: null,
+        fallbackWebSpeech: true,
+      });
     }
   });
 
@@ -403,31 +434,12 @@ Provide:
       // Also generate master native reference audio with Gemini 3.8 TTS
       let referenceAudioBase64 = null;
       try {
-        const ttsRef = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: targetNative,
-                  speechMetadata: {
-                    style: `Slow, pristine, crystal-clear standard pronunciation demonstration for ${language} tone learners`,
-                  },
-                },
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: 'Kore' },
-              },
-            },
-          },
-        });
-        referenceAudioBase64 = ttsRef.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        referenceAudioBase64 = await generateTtsAudio(
+          targetNative,
+          'Kore',
+          `Slow, pristine, crystal-clear standard pronunciation demonstration for ${language} tone learners`,
+          language
+        );
       } catch (e) {
         console.error('Reference TTS error:', e);
       }

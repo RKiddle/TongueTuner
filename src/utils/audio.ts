@@ -5,6 +5,7 @@
 class AudioController {
   private currentAudio: HTMLAudioElement | null = null;
   private onEndedCallback: (() => void) | null = null;
+  private isBrowserSpeaking = false;
 
   public playBase64Wav(base64Data: string, speed = 1.0, onEnded?: () => void): HTMLAudioElement {
     this.stop();
@@ -43,14 +44,93 @@ class AudioController {
     return audio;
   }
 
+  public speakWithBrowser(
+    text: string,
+    language: 'thai' | 'mandarin' | 'japanese',
+    speed = 1.0,
+    onEnded?: () => void
+  ): void {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      if (onEnded) onEnded();
+      return;
+    }
+
+    this.stop();
+
+    const langCodes: Record<'thai' | 'mandarin' | 'japanese', string> = {
+      thai: 'th-TH',
+      mandarin: 'zh-CN',
+      japanese: 'ja-JP',
+    };
+
+    const targetLang = langCodes[language] || 'en-US';
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = targetLang;
+    utterance.rate = Math.max(0.6, Math.min(1.5, speed));
+
+    try {
+      const voices = window.speechSynthesis.getVoices();
+      const matched = voices.find((v) =>
+        v.lang === targetLang ||
+        v.lang.toLowerCase().replace('_', '-').startsWith(targetLang.toLowerCase())
+      );
+      if (matched) {
+        utterance.voice = matched;
+      }
+    } catch (e) {
+      // voice selection fallback
+    }
+
+    this.isBrowserSpeaking = true;
+    this.onEndedCallback = onEnded || null;
+
+    utterance.onend = () => {
+      this.isBrowserSpeaking = false;
+      if (this.onEndedCallback) {
+        this.onEndedCallback();
+      }
+    };
+
+    utterance.onerror = (err) => {
+      console.warn('Browser speech synthesis error:', err);
+      this.isBrowserSpeaking = false;
+      if (this.onEndedCallback) {
+        this.onEndedCallback();
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  public playOrSynthesize(
+    audioBase64: string | null | undefined,
+    fallbackText: string,
+    language: 'thai' | 'mandarin' | 'japanese',
+    speed = 1.0,
+    onEnded?: () => void
+  ): void {
+    if (audioBase64) {
+      this.playBase64Wav(audioBase64, speed, onEnded);
+    } else if (fallbackText) {
+      this.speakWithBrowser(fallbackText, language, speed, onEnded);
+    } else {
+      if (onEnded) onEnded();
+    }
+  }
+
   public stop(): void {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {}
+    }
+    this.isBrowserSpeaking = false;
+
     if (this.currentAudio) {
       try {
         this.currentAudio.pause();
         this.currentAudio.currentTime = 0;
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
       if (this.onEndedCallback) {
         this.onEndedCallback();
       }
@@ -59,7 +139,11 @@ class AudioController {
   }
 
   public isPlaying(): boolean {
-    return this.currentAudio !== null && !this.currentAudio.paused;
+    return (
+      (this.currentAudio !== null && !this.currentAudio.paused) ||
+      this.isBrowserSpeaking ||
+      (typeof window !== 'undefined' && Boolean(window.speechSynthesis?.speaking))
+    );
   }
 }
 

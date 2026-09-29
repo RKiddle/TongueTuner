@@ -83,6 +83,8 @@ The app uses API endpoints such as:
 
 These power the conversational experience and audio generation features.
 
-## License
+## License & Copyright
 
-No license has been specified yet.
+Copyright © 2026 Dr Richard Kiddle. All rights reserved.
+
+Created and authored by Dr Richard Kiddle. Powered by Gemini 3.8 TTS and AI Studio.

@@ -7,18 +7,20 @@ import { SentimentFeedbackPanel } from './components/SentimentFeedbackPanel';
 import { PronunciationClinicModal } from './components/PronunciationClinicModal';
 import { ScenarioSelector } from './components/ScenarioSelector';
 import { VoiceSettingsModal } from './components/VoiceSettingsModal';
+import { FlashCards } from './components/FlashCards';
 import { audioController } from './utils/audio';
 
 export default function App() {
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('thai');
-  const [activeTab, setActiveTab] = useState<'chat' | 'sentiment' | 'clinic' | 'scenarios'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'flashcards' | 'sentiment' | 'clinic' | 'scenarios'>('chat');
   const [activeScenario, setActiveScenario] = useState<PracticeScenario | null>(null);
-  const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
+  const [selectedVoice, setSelectedVoice] = useState<string>('Puck');
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(true);
   const [showRomanization, setShowRomanization] = useState<boolean>(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [latestAnalysis, setLatestAnalysis] = useState<SentimentAnalysis | null>(null);
@@ -70,9 +72,14 @@ export default function App() {
         if (autoPlayAudio) {
           audioController.playBase64Wav(data.audioBase64, playbackSpeed);
         }
+      } else if (autoPlayAudio) {
+        audioController.speakWithBrowser(greetingText, lang, playbackSpeed);
       }
     } catch (err) {
-      console.warn('Greeting TTS error:', err);
+      console.warn('Greeting TTS error, using browser speech fallback:', err);
+      if (autoPlayAudio) {
+        audioController.speakWithBrowser(greetingText, lang, playbackSpeed);
+      }
     }
   }, [autoPlayAudio, playbackSpeed]);
 
@@ -149,8 +156,12 @@ export default function App() {
       setMessages((prev) => [...prev, tutorMsg]);
 
       // Auto-play audio if enabled
-      if (autoPlayAudio && data.audioBase64) {
-        audioController.playBase64Wav(data.audioBase64, playbackSpeed);
+      if (autoPlayAudio) {
+        if (data.audioBase64) {
+          audioController.playBase64Wav(data.audioBase64, playbackSpeed);
+        } else if (data.replyNative) {
+          audioController.speakWithBrowser(data.replyNative, currentLanguage, playbackSpeed);
+        }
       }
     } catch (err: any) {
       console.error('Chat error:', err);
@@ -191,28 +202,38 @@ export default function App() {
       const data = await res.json();
       if (data.audioBase64) {
         audioController.playBase64Wav(data.audioBase64, playbackSpeed);
+      } else {
+        audioController.speakWithBrowser(phrase, currentLanguage, playbackSpeed);
       }
     } catch (e) {
-      console.error('TTS error:', e);
+      audioController.speakWithBrowser(phrase, currentLanguage, playbackSpeed);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* 3-Zone Top Navigation */}
+    <div
+      className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
+        isDarkMode
+          ? 'bg-[#07090f] text-slate-100 selection:bg-[#ff2d87]/30 selection:text-[#ff2d87]'
+          : 'bg-[#FFFDF9] text-slate-800 selection:bg-rose-200 selection:text-rose-900'
+      }`}
+    >
+      {/* 3-Zone Top Navigation with Dark Neon Toggle */}
       <TopNav
         currentLanguage={currentLanguage}
         onSelectLanguage={handleSelectLanguage}
         activeTab={activeTab}
         onChangeTab={setActiveTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'chat' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left 7.5 Columns: Voice Chat Canvas */}
+            {/* Left 8 Columns: Voice Chat Canvas */}
             <div className="lg:col-span-8">
               <VoiceChat
                 language={currentLanguage}
@@ -227,10 +248,11 @@ export default function App() {
                 showRomanization={showRomanization}
                 onSelectPhrasePrompt={(p) => handleSendMessage(p, 'text')}
                 onOpenClinic={() => setActiveTab('clinic')}
+                isDarkMode={isDarkMode}
               />
             </div>
 
-            {/* Right 4.5 Columns: Real-Time Sentiment Radar & Feedback Panel */}
+            {/* Right 4 Columns: Real-Time Sentiment Radar & Feedback Panel */}
             <div className="lg:col-span-4 sticky top-24">
               <SentimentFeedbackPanel
                 analysis={latestAnalysis}
@@ -238,9 +260,19 @@ export default function App() {
                 scenarioTitle={activeScenario?.title}
                 onPlayPhrase={handlePlayPhrase}
                 voice={selectedVoice}
+                isDarkMode={isDarkMode}
               />
             </div>
           </div>
+        )}
+
+        {activeTab === 'flashcards' && (
+          <FlashCards
+            language={currentLanguage}
+            voice={selectedVoice}
+            playbackSpeed={playbackSpeed}
+            isDarkMode={isDarkMode}
+          />
         )}
 
         {activeTab === 'sentiment' && (
@@ -251,6 +283,7 @@ export default function App() {
               scenarioTitle={activeScenario?.title}
               onPlayPhrase={handlePlayPhrase}
               voice={selectedVoice}
+              isDarkMode={isDarkMode}
             />
           </div>
         )}
@@ -260,6 +293,7 @@ export default function App() {
             language={currentLanguage}
             voice={selectedVoice}
             playbackSpeed={playbackSpeed}
+            isDarkMode={isDarkMode}
           />
         )}
 
@@ -269,9 +303,44 @@ export default function App() {
             currentScenarioId={activeScenario?.id || null}
             onSelectScenario={handleSelectScenario}
             voice={selectedVoice}
+            isDarkMode={isDarkMode}
           />
         )}
       </main>
+
+      {/* Footer & Dr Richard Kiddle Copyright Notice */}
+      <footer
+        className={`w-full py-6 px-4 border-t mt-auto text-center transition-colors ${
+          isDarkMode
+            ? 'bg-[#0a0c14] border-[#ff2d87]/20 text-slate-400'
+            : 'bg-white border-rose-100 text-slate-500'
+        }`}
+      >
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className={isDarkMode ? 'text-neon-pink font-bold' : 'text-slate-800 font-bold'}>
+              TongueTuner AI™
+            </span>
+            <span className="hidden sm:inline text-slate-400">· Real-time Gemini 3.8 Voice & Tonal Lab</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={isDarkMode ? 'text-neon-green font-semibold' : 'text-slate-700 font-semibold'}>
+              Copyright © {new Date().getFullYear()} Dr Richard Kiddle. All rights reserved.
+            </span>
+          </div>
+
+          <div
+            className={`px-3 py-1 rounded-full border text-[11px] font-semibold ${
+              isDarkMode
+                ? 'bg-[#00e5ff]/10 text-neon-blue border-[#00e5ff]/30 shadow-[0_0_10px_rgba(0,229,255,0.2)]'
+                : 'bg-amber-50 text-amber-800 border-amber-200'
+            }`}
+          >
+            Conceived & Authored by Dr Richard Kiddle
+          </div>
+        </div>
+      </footer>
 
       {/* Voice Settings Engine Modal */}
       <VoiceSettingsModal
@@ -286,6 +355,7 @@ export default function App() {
         onToggleAutoPlay={setAutoPlayAudio}
         showRomanization={showRomanization}
         onToggleRomanization={setShowRomanization}
+        isDarkMode={isDarkMode}
       />
     </div>
   );

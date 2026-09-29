@@ -1,23 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, SentimentAnalysis, SupportedLanguage, PracticeScenario } from '../types';
 import { LANGUAGES } from '../data/languages';
+import { AnimalAvatar } from './AnimalAvatar';
 import { audioController, VoiceRecorder } from '../utils/audio';
 import {
   Mic,
-  MicOff,
   Send,
   Volume2,
-  VolumeX,
   Play,
   Pause,
   Sparkles,
   RefreshCw,
-  CheckCircle,
-  HelpCircle,
-  ArrowRight,
   Square,
-  MessageSquare,
-  Info,
 } from 'lucide-react';
 
 interface VoiceChatProps {
@@ -33,6 +27,7 @@ interface VoiceChatProps {
   showRomanization: boolean;
   onSelectPhrasePrompt: (phrase: string) => void;
   onOpenClinic: () => void;
+  isDarkMode?: boolean;
 }
 
 export const VoiceChat: React.FC<VoiceChatProps> = ({
@@ -48,6 +43,7 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
   showRomanization,
   onSelectPhrasePrompt,
   onOpenClinic,
+  isDarkMode = true,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -67,21 +63,27 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  // Audio playback end listener
-  const handlePlayMessageAudio = (messageId: string, audioBase64: string, speed = playbackSpeed) => {
-    if (playingMessageId === messageId) {
+  // Audio playback listener supporting both Gemini 3.8 audio and browser speech synthesis
+  const handlePlayMessageAudio = (message: ChatMessage, speed = playbackSpeed) => {
+    if (playingMessageId === message.id) {
       audioController.stop();
       setPlayingMessageId(null);
       return;
     }
 
-    setPlayingMessageId(messageId);
-    audioController.playBase64Wav(audioBase64, speed, () => {
-      setPlayingMessageId(null);
-    });
+    setPlayingMessageId(message.id);
+    audioController.playOrSynthesize(
+      message.audioBase64,
+      message.text,
+      language,
+      speed,
+      () => {
+        setPlayingMessageId(null);
+      }
+    );
   };
 
-  // Play individual phrase or word with Gemini 3.8 TTS
+  // Play individual phrase or word with Gemini 3.8 TTS or browser speech
   const handlePlayCustomWord = async (text: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -98,9 +100,12 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
       const data = await res.json();
       if (data.audioBase64) {
         audioController.playBase64Wav(data.audioBase64, 0.85);
+      } else {
+        audioController.speakWithBrowser(text, language, 0.85);
       }
     } catch (err) {
-      console.error('TTS error on word:', err);
+      console.warn('TTS error on word, using speech fallback:', err);
+      audioController.speakWithBrowser(text, language, 0.85);
     }
   };
 
@@ -154,12 +159,10 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
       setIsRecording(true);
       setRecordingSeconds(0);
 
-      // Start timer
       timerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
 
-      // Try browser speech recognition for live visual feedback
       recognitionRef.current = startSpeechRecognition();
     } catch (err) {
       console.error('Failed to start microphone:', err);
@@ -185,8 +188,6 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
       const { base64, mimeType } = await recorderRef.current.stop();
       recorderRef.current = null;
 
-      // If Web Speech already populated inputText, we can use that,
-      // or transcribe with Gemini 3.5 Transcribe for high accuracy on tones
       let finalText = inputText.trim();
 
       if (!finalText) {
@@ -221,20 +222,37 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)] rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-sm overflow-hidden shadow-2xl">
-      {/* Chat Sub-Header: Persona & Scenario Status */}
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-900/90">
+    <div
+      className={`flex flex-col h-[calc(100vh-7.5rem)] rounded-3xl border transition-colors overflow-hidden ${
+        isDarkMode
+          ? 'border-[#ff2d87]/30 bg-[#0f111a]/95 shadow-[0_0_35px_rgba(255,45,135,0.12)]'
+          : 'border-rose-100 bg-white/95 shadow-md'
+      }`}
+    >
+      {/* Sub-Header: Animal Persona & Scenario Status */}
+      <div
+        className={`flex items-center justify-between px-5 py-3 border-b transition-colors ${
+          isDarkMode
+            ? 'border-[#ff2d87]/20 bg-[#141724]'
+            : 'border-rose-100/80 bg-gradient-to-r from-rose-50/70 via-amber-50/50 to-orange-50/60'
+        }`}
+      >
         <div className="flex items-center gap-3">
-          {/* Avatar Icon */}
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/10 border border-amber-500/30 text-amber-300 font-display font-bold text-base shadow-sm">
-            {language === 'thai' ? 'พ' : language === 'mandarin' ? '李' : '由'}
-          </div>
+          <AnimalAvatar
+            animal={langInfo.tutorAnimal}
+            size="md"
+            speaking={Boolean(playingMessageId)}
+          />
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm text-white">{langInfo.tutorName}</span>
-              <span className="text-xs text-amber-400 font-medium">· {langInfo.flag}</span>
+              <span className={`font-bold text-sm ${isDarkMode ? 'text-neon-pink' : 'text-slate-800'}`}>
+                {langInfo.tutorName}
+              </span>
+              <span className={`text-xs font-semibold ${isDarkMode ? 'text-neon-green' : 'text-rose-500'}`}>
+                · {langInfo.flag}
+              </span>
             </div>
-            <p className="text-xs text-slate-400">
+            <p className={`text-xs line-clamp-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
               {activeScenario ? `Scenario: ${activeScenario.title}` : langInfo.tutorRole}
             </p>
           </div>
@@ -242,13 +260,23 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
 
         <div className="flex items-center gap-2">
           {activeScenario && (
-            <span className="hidden sm:inline-flex text-[11px] font-medium text-slate-300 bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-700/60">
+            <span
+              className={`hidden sm:inline-flex text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
+                isDarkMode
+                  ? 'text-neon-green bg-[#00ff88]/15 border-[#00ff88]/40'
+                  : 'text-rose-700 bg-rose-100/80 border-rose-200'
+              }`}
+            >
               Role: {activeScenario.userRole}
             </span>
           )}
           <button
             onClick={onClearChat}
-            className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+            className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+              isDarkMode
+                ? 'text-slate-400 hover:text-neon-blue border-transparent hover:border-[#00e5ff]/30 hover:bg-[#00e5ff]/10'
+                : 'text-slate-400 hover:text-slate-700 border-transparent hover:border-slate-200 hover:bg-white/80'
+            }`}
             title="Start fresh conversation"
           >
             Reset
@@ -257,7 +285,11 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
       </div>
 
       {/* Message List */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+      <div
+        className={`flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 transition-colors ${
+          isDarkMode ? 'bg-[#08090f]' : 'bg-[#FCFAF6]/60'
+        }`}
+      >
         {messages.map((message) => {
           const isUser = message.role === 'user';
           const isPlaying = playingMessageId === message.id;
@@ -265,40 +297,75 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
           return (
             <div
               key={message.id}
-              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-3xl ${
-                isUser ? 'ml-auto' : 'mr-auto'
-              }`}
+              className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse ml-auto' : 'mr-auto'} max-w-2xl`}
             >
+              {/* Cute Avatar beside message */}
+              {!isUser ? (
+                <AnimalAvatar animal={langInfo.tutorAnimal} size="sm" className="mt-1" />
+              ) : (
+                <div
+                  className={`h-8 w-8 rounded-full border flex items-center justify-center text-xs font-bold shrink-0 mt-1 shadow-2xs ${
+                    isDarkMode
+                      ? 'bg-[#ff2d87]/20 border-[#ff2d87] text-neon-pink shadow-[0_0_10px_rgba(255,45,135,0.4)]'
+                      : 'bg-rose-100 border-rose-300 text-rose-700'
+                  }`}
+                >
+                  You
+                </div>
+              )}
+
               {/* Message Bubble */}
               <div
-                className={`group relative rounded-2xl p-4 sm:p-5 transition-all ${
+                className={`relative rounded-3xl p-4 sm:p-5 transition-all shadow-xs ${
                   isUser
-                    ? 'bg-amber-500/15 border border-amber-500/30 text-slate-100'
-                    : 'bg-slate-850/90 border border-slate-750 text-slate-100 shadow-sm'
+                    ? isDarkMode
+                      ? 'bg-[#ff2d87]/20 border-2 border-[#ff2d87] text-white rounded-tr-xs shadow-[0_0_20px_rgba(255,45,135,0.25)]'
+                      : 'bg-rose-500 text-white rounded-tr-xs'
+                    : isDarkMode
+                    ? 'bg-[#121522] border-2 border-[#00e5ff]/35 text-slate-100 rounded-tl-xs shadow-[0_0_20px_rgba(0,229,255,0.1)]'
+                    : 'bg-white border border-rose-100/90 text-slate-800 rounded-tl-xs'
                 }`}
               >
-                {/* User Message Header or Tutor Header */}
-                <div className="flex items-center justify-between text-xs text-slate-400 mb-2 gap-4">
-                  <div className="flex items-center gap-1.5 font-medium">
-                    <span>{isUser ? 'You' : langInfo.tutorName}</span>
+                {/* Header inside Bubble */}
+                <div className="flex items-center justify-between text-xs mb-2 gap-4">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <span
+                      className={
+                        isUser
+                          ? isDarkMode ? 'text-neon-pink' : 'text-rose-100'
+                          : isDarkMode ? 'text-neon-blue' : 'text-slate-500'
+                      }
+                    >
+                      {isUser ? 'You' : langInfo.tutorName.split(' ')[0]}
+                    </span>
                     {isUser && message.inputMode === 'voice' && (
-                      <span className="text-[10px] text-amber-400 flex items-center gap-0.5">
-                        <Mic className="h-3 w-3" /> Voice
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full flex items-center gap-0.5 ${
+                          isDarkMode
+                            ? 'text-neon-green bg-[#00ff88]/20 border border-[#00ff88]/40'
+                            : 'text-rose-200 bg-rose-600/60'
+                        }`}
+                      >
+                        <Mic className="h-2.5 w-2.5" /> Voice
                       </span>
                     )}
                   </div>
 
                   {/* Audio Controls for Tutor */}
-                  {!isUser && message.audioBase64 && (
-                    <div className="flex items-center gap-2">
+                  {!isUser && (
+                    <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => handlePlayMessageAudio(message.id, message.audioBase64!)}
-                        className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                        onClick={() => handlePlayMessageAudio(message)}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all shadow-2xs ${
                           isPlaying
-                            ? 'bg-amber-500 text-slate-950 border-amber-400'
-                            : 'bg-slate-800 text-slate-300 hover:text-white border-slate-700 hover:bg-slate-700'
+                            ? isDarkMode
+                              ? 'bg-[#00ff88] text-slate-950 shadow-[0_0_15px_rgba(0,255,136,0.6)]'
+                              : 'bg-rose-500 text-white shadow-rose-200'
+                            : isDarkMode
+                            ? 'bg-[#00ff88]/15 text-neon-green hover:bg-[#00ff88]/25 border border-[#00ff88]/50 shadow-[0_0_10px_rgba(0,255,136,0.2)]'
+                            : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200/80'
                         }`}
-                        title="Play Gemini 3.8 TTS voice response"
+                        title="Listen to native voice pronunciation"
                       >
                         {isPlaying ? (
                           <>
@@ -315,8 +382,12 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
 
                       {/* Slow playback option */}
                       <button
-                        onClick={() => handlePlayMessageAudio(message.id, message.audioBase64!, 0.75)}
-                        className="px-2 py-1 rounded-md text-xs text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60"
+                        onClick={() => handlePlayMessageAudio(message, 0.75)}
+                        className={`px-2 py-1 rounded-full text-[11px] font-semibold border ${
+                          isDarkMode
+                            ? 'text-neon-blue bg-[#00e5ff]/15 hover:bg-[#00e5ff]/25 border-[#00e5ff]/40'
+                            : 'text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border-slate-200/80'
+                        }`}
                         title="Listen at 0.75x slow speed for tone clarity"
                       >
                         0.75x
@@ -325,47 +396,75 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
                   )}
                 </div>
 
-                {/* Primary Content: Native Script */}
-                <div className="text-base sm:text-lg font-medium leading-relaxed tracking-wide text-white">
+                {/* Primary Content: Native Script (Neon Blue / Pink in dark mode) */}
+                <div
+                  className={`text-base sm:text-lg font-semibold leading-relaxed tracking-wide ${
+                    isUser
+                      ? isDarkMode ? 'text-white' : 'text-white'
+                      : isDarkMode ? 'text-neon-blue' : 'text-slate-800'
+                  }`}
+                >
                   {message.text}
                 </div>
 
-                {/* Romanized Phonetic Guide (Pinyin / Romaji / Thai RTGS) */}
+                {/* Romanized Phonetic Guide: Neon Green in dark mode */}
                 {!isUser && message.romanized && showRomanization && (
-                  <div className="mt-2 text-xs font-mono text-amber-400/90 tracking-wide bg-slate-900/60 rounded-lg px-2.5 py-1.5 border border-slate-800">
+                  <div
+                    className={`mt-2 text-xs font-mono tracking-wide rounded-xl px-3 py-1.5 border ${
+                      isDarkMode
+                        ? 'text-neon-green bg-[#00ff88]/10 border-[#00ff88]/30 shadow-[0_0_10px_rgba(0,255,136,0.15)]'
+                        : 'text-amber-800 bg-amber-50/80 border-amber-200/80'
+                    }`}
+                  >
                     {message.romanized}
                   </div>
                 )}
 
-                {/* English Translation */}
+                {/* English Translation: Neon Pink in dark mode */}
                 {!isUser && message.english && (
-                  <div className="mt-1.5 text-xs text-slate-400 italic">
+                  <div
+                    className={`mt-1.5 text-xs italic ${
+                      isDarkMode ? 'text-[#ff7eb6]' : 'text-slate-500'
+                    }`}
+                  >
                     "{message.english}"
                   </div>
                 )}
 
                 {/* Audio Wave Playing Indicator */}
                 {isPlaying && (
-                  <div className="mt-3 flex items-center gap-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
-                    <Volume2 className="h-4 w-4 animate-pulse text-amber-400" />
-                    <span className="font-medium">Streaming Gemini 3.8 TTS audio...</span>
+                  <div
+                    className={`mt-3 flex items-center gap-2 p-2 rounded-xl border text-xs ${
+                      isDarkMode
+                        ? 'bg-[#00ff88]/15 border-[#00ff88]/40 text-neon-green shadow-[0_0_12px_rgba(0,255,136,0.3)]'
+                        : 'bg-rose-50 border-rose-200/80 text-rose-700'
+                    }`}
+                  >
+                    <Volume2 className={`h-4 w-4 animate-bounce ${isDarkMode ? 'text-[#00ff88]' : 'text-rose-500'}`} />
+                    <span className="font-semibold">{langInfo.tutorName} is speaking with Gemini 3.8 TTS...</span>
                     <div className="flex items-center gap-0.5 ml-2">
-                      <span className="h-2 w-0.5 bg-amber-400 animate-bounce" />
-                      <span className="h-3 w-0.5 bg-amber-400 animate-bounce delay-75" />
-                      <span className="h-1.5 w-0.5 bg-amber-400 animate-bounce delay-150" />
+                      <span className={`h-2 w-1 rounded-full animate-bounce ${isDarkMode ? 'bg-[#00ff88]' : 'bg-rose-400'}`} />
+                      <span className={`h-3 w-1 rounded-full animate-bounce delay-75 ${isDarkMode ? 'bg-[#00e5ff]' : 'bg-rose-500'}`} />
+                      <span className={`h-2 w-1 rounded-full animate-bounce delay-150 ${isDarkMode ? 'bg-[#ff2d87]' : 'bg-rose-400'}`} />
                     </div>
                   </div>
                 )}
 
                 {/* Real-time Sentiment Tag for Learner Voice Input */}
                 {isUser && message.analysis && (
-                  <div className="mt-3 pt-2.5 border-t border-amber-500/20 text-xs flex flex-wrap items-center gap-2 text-slate-300">
-                    <span className="font-semibold text-amber-400">Tone Posture:</span>
+                  <div
+                    className={`mt-2.5 pt-2 border-t text-[11px] flex flex-wrap items-center gap-2 ${
+                      isDarkMode
+                        ? 'border-[#ff2d87]/40 text-neon-green'
+                        : 'border-rose-400/40 text-rose-100'
+                    }`}
+                  >
+                    <span className={`font-bold ${isDarkMode ? 'text-neon-pink' : 'text-white'}`}>🐾 Tone:</span>
                     <span>{message.analysis.sentiment}</span>
-                    <span aria-hidden="true" className="text-slate-600">·</span>
-                    <span className="text-slate-400">Politeness: {message.analysis.politenessScore}%</span>
-                    <span aria-hidden="true" className="text-slate-600">·</span>
-                    <span className="text-slate-400">Confidence: {message.analysis.confidenceScore}%</span>
+                    <span aria-hidden="true">·</span>
+                    <span className={isDarkMode ? 'text-neon-blue' : ''}>Politeness: {message.analysis.politenessScore}%</span>
+                    <span aria-hidden="true">·</span>
+                    <span className={isDarkMode ? 'text-neon-green' : ''}>Confidence: {message.analysis.confidenceScore}%</span>
                   </div>
                 )}
               </div>
@@ -375,16 +474,23 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
 
         {/* Loading Spinner */}
         {isLoading && (
-          <div className="flex items-start gap-3 mr-auto max-w-xl">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 border border-slate-700 text-amber-400">
-              <RefreshCw className="h-4 w-4 animate-spin" />
-            </div>
-            <div className="rounded-2xl bg-slate-850 p-4 border border-slate-800 text-xs text-slate-400 space-y-1">
-              <div className="flex items-center gap-2 font-medium text-slate-200">
-                <span>{langInfo.tutorName} is analyzing tone & preparing voice response...</span>
+          <div className="flex items-start gap-2.5 mr-auto max-w-xl">
+            <AnimalAvatar animal={langInfo.tutorAnimal} size="sm" className="mt-1 animate-pulse" />
+            <div
+              className={`rounded-3xl p-4 border text-xs shadow-2xs space-y-1 ${
+                isDarkMode
+                  ? 'bg-[#121522] border-[#ff2d87]/30 text-slate-300'
+                  : 'bg-white border-rose-100 text-slate-500'
+              }`}
+            >
+              <div className="flex items-center gap-2 font-bold">
+                <Sparkles className={`h-3.5 w-3.5 animate-spin ${isDarkMode ? 'text-neon-pink' : 'text-rose-400'}`} />
+                <span className={isDarkMode ? 'text-neon-pink' : 'text-slate-700'}>
+                  {langInfo.tutorName} is listening with sweet ears...
+                </span>
               </div>
-              <p className="text-slate-500 text-[11px]">
-                Generating sentiment analysis and Gemini 3.8 TTS audio synthesis.
+              <p className={`text-[11px] ${isDarkMode ? 'text-neon-blue' : 'text-slate-400'}`}>
+                Analyzing vocal tone & preparing encouraging voice coaching!
               </p>
             </div>
           </div>
@@ -395,57 +501,97 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
 
       {/* Suggested Quick Phrases for Current Scenario */}
       {activeScenario && activeScenario.targetPhrases.length > 0 && (
-        <div className="px-4 py-2 border-t border-slate-800 bg-slate-900/90 flex items-center gap-2 overflow-x-auto text-xs no-scrollbar">
-          <span className="text-slate-500 shrink-0 text-[11px] font-medium">Quick Phrases:</span>
+        <div
+          className={`px-4 py-2 border-t flex items-center gap-2 overflow-x-auto text-xs no-scrollbar ${
+            isDarkMode
+              ? 'bg-[#0f111a] border-[#ff2d87]/20'
+              : 'bg-[#FFFDF9] border-rose-100'
+          }`}
+        >
+          <span className={`shrink-0 text-[11px] font-semibold ${isDarkMode ? 'text-neon-pink' : 'text-slate-400'}`}>
+            ✨ Try Saying:
+          </span>
           {activeScenario.targetPhrases.map((tp, idx) => (
             <button
               key={idx}
               onClick={() => onSelectPhrasePrompt(tp.native)}
-              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/60 transition-colors whitespace-nowrap"
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all whitespace-nowrap shadow-2xs ${
+                isDarkMode
+                  ? 'bg-[#00e5ff]/15 hover:bg-[#00e5ff]/25 text-neon-blue border-[#00e5ff]/40 hover:shadow-[0_0_12px_rgba(0,229,255,0.3)]'
+                  : 'bg-rose-50/80 hover:bg-rose-100 text-rose-800 border-rose-200/80'
+              }`}
             >
-              <span>{tp.native}</span>
-              <span className="text-slate-500 text-[10px]">({tp.english})</span>
+              <span className="font-bold">{tp.native}</span>
+              <span className={`text-[10px] ${isDarkMode ? 'text-neon-green' : 'text-rose-600/70'}`}>
+                ({tp.english})
+              </span>
             </button>
           ))}
         </div>
       )}
 
       {/* Bottom Input & Voice Recording Bar */}
-      <div className="p-4 border-t border-slate-800 bg-slate-900/95 space-y-3">
+      <div
+        className={`p-3.5 border-t space-y-2.5 ${
+          isDarkMode
+            ? 'bg-[#0e1019] border-[#ff2d87]/20'
+            : 'bg-[#FFFDF9] border-rose-100'
+        }`}
+      >
         {/* Active Recording State Banner */}
         {isRecording && (
-          <div className="flex items-center justify-between p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 animate-in fade-in">
+          <div
+            className={`flex items-center justify-between p-3 rounded-2xl border text-xs animate-in fade-in shadow-xs ${
+              isDarkMode
+                ? 'bg-[#ff2d87]/20 border-[#ff2d87] text-white shadow-[0_0_20px_rgba(255,45,135,0.3)]'
+                : 'bg-rose-100/80 border-rose-300 text-rose-900'
+            }`}
+          >
             <div className="flex items-center gap-3">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
+              <span className="relative flex h-3.5 w-3.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ff2d87] opacity-75" />
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-[#ff2d87]" />
               </span>
               <div>
-                <div className="text-xs font-semibold text-white">Recording Voice in {langInfo.name}...</div>
-                <div className="text-[11px] text-rose-300">
-                  {inputText ? `"${inputText}"` : 'Listening for your pitch, tones, and politeness particles...'}
+                <div className={`font-bold ${isDarkMode ? 'text-neon-pink' : 'text-rose-900'}`}>
+                  {langInfo.tutorName} is listening to your sweet voice!
+                </div>
+                <div className={`text-[11px] ${isDarkMode ? 'text-neon-green' : 'text-rose-700'}`}>
+                  {inputText ? `"${inputText}"` : 'Speak clearly with tones and polite particles...'}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-xs font-mono font-bold text-rose-400">
+              <span
+                className={`font-mono font-bold px-2 py-0.5 rounded-full ${
+                  isDarkMode
+                    ? 'text-neon-green bg-black/60 border border-[#00ff88]/40'
+                    : 'text-rose-700 bg-white/80'
+                }`}
+              >
                 00:{recordingSeconds < 10 ? `0${recordingSeconds}` : recordingSeconds}
               </span>
               <button
                 onClick={handleStopVoice}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition-colors shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-[#ff2d87] hover:bg-[#ff0066] text-white rounded-xl transition-all shadow-[0_0_15px_rgba(255,45,135,0.5)]"
               >
-                <Square className="h-3.5 w-3.5 fill-current" />
-                <span>Finish & Send</span>
+                <Square className="h-3 w-3 fill-current" />
+                <span>Finish</span>
               </button>
             </div>
           </div>
         )}
 
         {isTranscribing && (
-          <div className="flex items-center justify-center gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
+          <div
+            className={`flex items-center justify-center gap-2 p-2 rounded-xl border text-xs ${
+              isDarkMode
+                ? 'bg-[#00e5ff]/15 border-[#00e5ff]/40 text-neon-blue'
+                : 'bg-amber-50 border-amber-200 text-amber-800'
+            }`}
+          >
             <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-            <span>Transcribing spoken audio with Gemini Transcribe...</span>
+            <span>Transcribing your cute voice with Gemini...</span>
           </div>
         )}
 
@@ -457,7 +603,11 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
               type="button"
               onClick={handleStartVoice}
               disabled={isLoading || isTranscribing}
-              className="flex items-center justify-center h-11 w-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition-transform active:scale-95 shadow-md shrink-0"
+              className={`flex items-center justify-center h-12 w-12 rounded-2xl font-bold transition-all active:scale-95 shrink-0 ${
+                isDarkMode
+                  ? 'bg-[#ff2d87] hover:bg-[#ff0077] text-white shadow-[0_0_20px_rgba(255,45,135,0.5)]'
+                  : 'bg-rose-500 hover:bg-rose-600 text-white shadow-sm hover:shadow-md'
+              }`}
               title="Speak with your microphone"
             >
               <Mic className="h-5 w-5" />
@@ -466,7 +616,7 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
             <button
               type="button"
               onClick={handleStopVoice}
-              className="flex items-center justify-center h-11 w-11 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold transition-transform active:scale-95 shadow-md shrink-0 animate-pulse"
+              className="flex items-center justify-center h-12 w-12 rounded-2xl bg-[#ff0066] text-white font-bold transition-transform active:scale-95 shadow-[0_0_25px_rgba(255,0,102,0.7)] shrink-0 animate-pulse"
               title="Stop recording"
             >
               <Square className="h-4 w-4 fill-current" />
@@ -479,9 +629,13 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder={`Say something or type in ${langInfo.name}...`}
+              placeholder={`Say something or chat in ${langInfo.name}...`}
               disabled={isLoading || isRecording}
-              className="w-full h-11 rounded-xl bg-slate-800/90 border border-slate-700/80 px-4 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 transition-all"
+              className={`w-full h-12 rounded-2xl px-4 text-sm focus:outline-none transition-all ${
+                isDarkMode
+                  ? 'bg-[#151824] border border-[#00e5ff]/35 text-white placeholder-slate-500 focus:border-[#00e5ff] focus:ring-2 focus:ring-[#00e5ff]/30 shadow-[0_0_15px_rgba(0,229,255,0.08)]'
+                  : 'bg-white border border-rose-200 text-slate-800 placeholder-slate-400 focus:border-rose-400 focus:ring-2 focus:ring-rose-200 shadow-2xs'
+              }`}
             />
           </div>
 
@@ -489,7 +643,11 @@ export const VoiceChat: React.FC<VoiceChatProps> = ({
           <button
             type="submit"
             disabled={!inputText.trim() || isLoading}
-            className="flex items-center justify-center h-11 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:hover:bg-slate-800 font-medium text-xs border border-slate-700 transition-colors shrink-0"
+            className={`flex items-center justify-center h-12 px-5 rounded-2xl disabled:opacity-40 font-bold text-xs transition-all active:scale-95 shrink-0 ${
+              isDarkMode
+                ? 'bg-[#00ff88] hover:bg-[#00e676] text-slate-950 shadow-[0_0_20px_rgba(0,255,136,0.5)]'
+                : 'bg-amber-400 hover:bg-amber-500 text-slate-900 shadow-2xs'
+            }`}
           >
             <Send className="h-4 w-4" />
           </button>

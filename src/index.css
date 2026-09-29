@@ -12,3 +12,59 @@ body {
 .font-display {
   font-family: var(--font-display);
 }
+
+/* Neon Typography & Glow Utilities */
+.text-neon-pink {
+  color: #ff2d87;
+  text-shadow: 0 0 8px rgba(255, 45, 135, 0.5), 0 0 20px rgba(255, 45, 135, 0.2);
+}
+
+.text-neon-green {
+  color: #00ff88;
+  text-shadow: 0 0 8px rgba(0, 255, 136, 0.5), 0 0 20px rgba(0, 255, 136, 0.2);
+}
+
+.text-neon-blue {
+  color: #00e5ff;
+  text-shadow: 0 0 8px rgba(0, 229, 255, 0.5), 0 0 20px rgba(0, 229, 255, 0.2);
+}
+
+.border-neon-pink {
+  border-color: #ff2d87;
+  box-shadow: 0 0 12px rgba(255, 45, 135, 0.25);
+}
+
+.border-neon-green {
+  border-color: #00ff88;
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.25);
+}
+
+.border-neon-blue {
+  border-color: #00e5ff;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.25);
+}
+
+.bg-neon-pink {
+  background-color: #ff2d87;
+}
+
+.bg-neon-green {
+  background-color: #00ff88;
+}
+
+.bg-neon-blue {
+  background-color: #00e5ff;
+}
+
+/* Glow Shadows */
+.glow-pink {
+  box-shadow: 0 0 20px rgba(255, 45, 135, 0.35);
+}
+
+.glow-green {
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.35);
+}
+
+.glow-blue {
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.35);
+}
